@@ -1,0 +1,76 @@
+Evaluation configuration — COLING 2025 detoxification reproduction
+======================================================================
+
+Dataset
+-------
+English held-out test set, expected 600 examples.
+Required columns: id, toxic_sentence, neutral_sentence.
+All prediction files must use the same stable example IDs.
+Prediction text column accepted: generated_sentence, prediction, output,
+generated_text, or generated.
+
+Metric implementations
+----------------------
+STA:
+  Model: textdetox/xlmr-large-toxicity-classifier
+  Uses softmax probability for the label mapped to 'neutral' based on the
+  downloaded model config. The model config currently maps 0 -> neutral and
+  1 -> toxic. This is a probability score in [0,1], not a thresholded accuracy.
+  The script inspects id2label and refuses to guess if no neutral label exists.
+
+SIM:
+  Model: sentence-transformers/LaBSE
+  Pairwise cosine similarity between toxic input and generated sentence.
+  Embeddings are normalized before dot product. The raw cosine range [-1,1]
+  is retained; no undocumented rescaling is applied.
+
+ChrF1:
+  SacreBLEU CHRF sentence_score, one human neutral reference per output.
+  Settings: char_order=6, word_order=0 (chrF, not chrF++), beta=2,
+  whitespace=False (whitespace removed), eps_smoothing=False.
+  SacreBLEU's [0,100] result is divided by 100 to put it on [0,1].
+  Verify these settings against the official repository before claiming exact
+  reproduction; if its code uses different settings, update and record them.
+
+Joint:
+  Use the arithmetic mean of per-example products:
+      Joint = mean_i(STA_i * SIM_i * ChrF1_i)
+  Important formula check: the COLING paper's published English human-reference
+  values (STA=0.864, SIM=0.820, ChrF=1.000, Joint=0.711) are consistent with
+  the product 0.864*0.820*1.000 ~= 0.708 (small discrepancy due to rounding /
+  underlying values), and inconsistent with taking the cube root (~0.892).
+  The paper repository also describes J = mean(STA * SIM * ChrF1).
+  Therefore this implementation follows the paper's product definition, not
+  the cube-root formula in the assignment brief. Confirm with the project
+  supervisor if a separate requested variant is intentionally required.
+
+Failure policy
+--------------
+Missing/blank output or missing prediction ID:
+  Keep the test example in the denominator, set STA, SIM, ChrF1 and Joint to
+  zero, and flag generation_failed=true. This is a conservative, transparent
+  policy; also report failed_generations.
+Extra prediction IDs and duplicate IDs are errors rather than silently ignored.
+
+Runtime
+-------
+Default batch size is 8 to limit GPU memory use. Lower to 4 or 2 if needed.
+Hugging Face and SentenceTransformers cache downloaded models automatically.
+For a CPU-only run, use --device cpu (will be slower).
+
+Paper-reported English Joint scores (reference only; not measured by this code)
+-------------------------------------------------------------------------------
+Human references: 0.711
+Duplicate: 0.061
+Delete: 0.447
+Backtranslation: 0.506
+condBERT: 0.278
+mBART-Translated: 0.443
+mBART-mParaDetox: 0.339
+GPT-4 few-shot: 0.475
+GPT-4 CoT: 0.326
+
+These are paper values and must never be presented as our own measurements.
+The project's mBART trained on 400 pairs and ~19.7k pairs are different runs and
+should be labeled separately (mbart_400, mbart_large_data). Do not equate them
+with mBART-Translated or mBART-mParaDetox without checking training setup.
